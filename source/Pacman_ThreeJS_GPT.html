@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Pac-Man Clone</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://threejs.org/build/three.js"></script>
+    <script>
+        // Configuration
+        const WIDTH = 800;
+        const HEIGHT = 600;
+        const FOV = 75;
+        const NEAR = 0.1;
+        const FAR = 1000;
+
+        // Game objects
+        let scene, camera, renderer;
+        let pacman, ghosts;
+        let playerSpeed = 0.15; // Speed of Pac-Man
+        let ghostSpeed = 0.1; // Speed of the ghosts
+        let level = [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 1, 1, 1, 1, 0, 1],
+            [1, 0, 1, 0, 0, 0, 0, 1, 0, 1],
+            [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
+            [1, 0, 1, 0, 1, 1, 0, 1, 0, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        ];
+
+        // Level constants
+        const CELL_SIZE = 4;
+        const WALL_HEIGHT = 2;
+
+        // Keyboard input
+        let keys = {};
+
+        // Initialize the game
+        function init() {
+            // Create the scene
+            scene = new THREE.Scene();
+
+            // Create the camera
+            camera = new THREE.PerspectiveCamera(FOV, WIDTH / HEIGHT, NEAR, FAR);
+            camera.position.set(0, 30, 0);
+            camera.rotation.x = -Math.PI / 2;
+
+            // Create the renderer
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(WIDTH, HEIGHT);
+            document.body.appendChild(renderer.domElement);
+
+            // Create Pac-Man
+            const pacmanGeometry = new THREE.SphereGeometry(1, 32, 32);
+            const pacmanMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            pacman = new THREE.Mesh(pacmanGeometry, pacmanMaterial);
+            scene.add(pacman);
+            placeObjectInCell(pacman, 1, 1); // Place Pac-Man in a specific cell
+
+            // Create Ghosts
+            ghosts = [];
+            const ghostGeometry = new THREE.SphereGeometry(1, 32, 32);
+            const ghostMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            for (let i = 0; i < 4; i++) {
+                const ghost = new THREE.Mesh(ghostGeometry, ghostMaterial);
+                ghosts.push(ghost);
+                scene.add(ghost);
+                placeObjectInCell(ghost, 2 + i, 4); // Place each ghost in a specific cell
+            }
+
+            // Create the level
+            createLevel();
+
+            // Add event listeners for keyboard input
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            // Start the game loop
+            animate();
+        }
+
+        // Create the level
+        function createLevel() {
+            for (let row = 0; row < level.length; row++) {
+                for (let col = 0; col < level[row].length; col++) {
+                    if (level[row][col] === 1) {
+                        // Create a wall
+                        const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, WALL_HEIGHT, CELL_SIZE);
+                        const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+                        const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+                        const x = col * CELL_SIZE - (level[0].length * CELL_SIZE) / 2 + CELL_SIZE / 2;
+                        const z = -row * CELL_SIZE + (level.length * CELL_SIZE) / 2 - CELL_SIZE / 2;
+                        wall.position.set(x, WALL_HEIGHT / 2, z);
+                        scene.add(wall);
+                    }
+                }
+            }
+        }
+
+        // Place an object in a specific cell of the level
+        function placeObjectInCell(object, row, col) {
+            const x = col * CELL_SIZE - (level[0].length * CELL_SIZE) / 2 + CELL_SIZE / 2;
+            const z = -row * CELL_SIZE + (level.length * CELL_SIZE) / 2 - CELL_SIZE / 2;
+            object.position.set(x, object.position.y, z);
+        }
+
+        // Handle key down events
+        function onKeyDown(event) {
+            keys[event.keyCode] = true;
+        }
+
+        // Handle key up events
+        function onKeyUp(event) {
+            keys[event.keyCode] = false;
+        }
+
+        // Update the game state
+        function update() {
+            // Move Pac-Man
+            if (keys[37]) { // Left arrow key
+                moveObject(pacman, -playerSpeed, 0);
+            } else if (keys[39]) { // Right arrow key
+                moveObject(pacman, playerSpeed, 0);
+            } else if (keys[38]) { // Up arrow key
+                moveObject(pacman, 0, -playerSpeed);
+            } else if (keys[40]) { // Down arrow key
+                moveObject(pacman, 0, playerSpeed);
+            }
+
+            // Move Ghosts towards Pac-Man
+            const pacmanCell = getCellFromPosition(pacman.position);
+            for (const ghost of ghosts) {
+                const ghostCell = getCellFromPosition(ghost.position);
+                const path = findShortestPath(ghostCell, pacmanCell);
+                if (path.length > 1) {
+                    const nextCell = path[1];
+                    const deltaX = nextCell.col - ghostCell.col;
+                    const deltaZ = nextCell.row - ghostCell.row;
+                    moveObject(ghost, deltaX * ghostSpeed, deltaZ * ghostSpeed);
+                }
+            }
+        }
+
+        // Perform collision detection
+        function detectCollisions() {
+            // Check collision between Pac-Man and walls
+            const pacmanCell = getCellFromPosition(pacman.position);
+            if (level[pacmanCell.row][pacmanCell.col] === 1) {
+                // Pac-Man collided with a wall, stop its movement
+                stopObject(pacman);
+            }
+
+            // Check collision between ghosts and walls
+            for (const ghost of ghosts) {
+                const ghostCell = getCellFromPosition(ghost.position);
+                if (level[ghostCell.row][ghostCell.col] === 1) {
+                    // Ghost collided with a wall, stop its movement
+                    stopObject(ghost);
+                }
+            }
+        }
+
+        // Move an object by the specified amount in x and z directions
+        function moveObject(object, deltaX, deltaZ) {
+            const newPosition = object.position.clone().add(new THREE.Vector3(deltaX, 0, deltaZ));
+            const newCell = getCellFromPosition(newPosition);
+            if (isValidCell(newCell)) {
+                object.position.copy(newPosition);
+            }
+        }
+
+        // Stop the movement of an object
+        function stopObject(object) {
+            object.position.copy(getCellCenterPosition(getCellFromPosition(object.position)));
+        }
+
+        // Get the cell coordinates (row and column) of a position in the level
+        function getCellFromPosition(position) {
+            const col = Math.floor((position.x + (level[0].length * CELL_SIZE) / 2) / CELL_SIZE);
+            const row = Math.floor((-position.z + (level.length * CELL_SIZE) / 2) / CELL_SIZE);
+            return { row, col };
+        }
+
+        // Check if a cell is a valid cell within the level bounds
+        function isValidCell(cell) {
+            return (
+                cell.row >= 0 &&
+                cell.row < level.length &&
+                cell.col >= 0 &&
+                cell.col < level[cell.row].length &&
+                level[cell.row][cell.col] !== 1
+            );
+        }
+
+        // Get the position at the center of a cell
+        function getCellCenterPosition(cell) {
+            const x = cell.col * CELL_SIZE - (level[0].length * CELL_SIZE) / 2 + CELL_SIZE / 2;
+            const z = -cell.row * CELL_SIZE + (level.length * CELL_SIZE) / 2 - CELL_SIZE / 2;
+            return new THREE.Vector3(x, 0, z);
+        }
+
+        // Find the shortest path from startCell to endCell using A* search
+        function findShortestPath(startCell, endCell) {
+            const openSet = [];
+            const cameFrom = new Map();
+            const gScore = new Map();
+            const fScore = new Map();
+
+            gScore.set(getCellKey(startCell), 0);
+            fScore.set(getCellKey(startCell), heuristicCostEstimate(startCell, endCell));
+            openSet.push(startCell);
+
+            while (openSet.length > 0) {
+                const currentCell = openSet.sort((a, b) => fScore.get(getCellKey(a)) - fScore.get(getCellKey(b)))[0];
+                openSet.splice(openSet.indexOf(currentCell), 1);
+
+                if (currentCell.row === endCell.row && currentCell.col === endCell.col) {
+                    // Reached the goal, reconstruct the path
+                    return reconstructPath(cameFrom, currentCell);
+                }
+
+                const neighbors = getNeighbors(currentCell);
+                for (const neighbor of neighbors) {
+                    const tentativeGScore = gScore.get(getCellKey(currentCell)) + 1;
+                    if (!gScore.has(getCellKey(neighbor)) || tentativeGScore < gScore.get(getCellKey(neighbor))) {
+                        cameFrom.set(getCellKey(neighbor), currentCell);
+                        gScore.set(getCellKey(neighbor), tentativeGScore);
+                        fScore.set(getCellKey(neighbor), tentativeGScore + heuristicCostEstimate(neighbor, endCell));
+                        if (!openSet.includes(neighbor)) {
+                            openSet.push(neighbor);
+                        }
+                    }
+                }
+            }
+
+            return []; // No path found
+
+            function getCellKey(cell) {
+                return `${cell.row}-${cell.col}`;
+            }
+
+            function heuristicCostEstimate(cellA, cellB) {
+                return Math.abs(cellA.row - cellB.row) + Math.abs(cellA.col - cellB.col);
+            }
+
+            function getNeighbors(cell) {
+                const neighbors = [];
+                const deltas = [
+                    { row: -1, col: 0 }, // Up
+                    { row: 1, col: 0 }, // Down
+                    { row: 0, col: -1 }, // Left
+                    { row: 0, col: 1 } // Right
+                ];
+                for (const delta of deltas) {
+                    const neighbor = { row: cell.row + delta.row, col: cell.col + delta.col };
+                    if (isValidCell(neighbor)) {
+                        neighbors.push(neighbor);
+                    }
+                }
+                return neighbors;
+            }
+
+            function reconstructPath(cameFrom, currentCell) {
+                const path = [currentCell];
+                while (cameFrom.has(getCellKey(currentCell))) {
+                    currentCell = cameFrom.get(getCellKey(currentCell));
+                    path.unshift(currentCell);
+                }
+                return path;
+            }
+        }
+
+        // Render the scene
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+        // The game loop
+        function animate() {
+            requestAnimationFrame(animate);
+            update();
+            detectCollisions();
+            render();
+        }
+
+        // Start the game
+        init();
+    </script>
+</body>
+</html>
